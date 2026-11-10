@@ -15,9 +15,31 @@ jobs:
         run: |
           choco install -y --no-progress boost-msvc-14.3 openssl mysql
 
-      - name: CMake konfigurieren
+      - name: Pfade fuer Boost und MySQL ermitteln
+        shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTOOLS=1 -DSCRIPTS=static -DWITH_WARNINGS=0
+          $boostConfig = Get-ChildItem "C:\local" -Filter "BoostConfig.cmake" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $boostConfig) { throw "BoostConfig.cmake nicht gefunden" }
+          $boostRoot = (Get-ChildItem "C:\local" -Filter "boost_*" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
+
+          $mysqlHeader = Get-ChildItem "C:\tools", "C:\Program Files\MySQL" -Filter "mysql.h" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          $mysqlLib = Get-ChildItem "C:\tools", "C:\Program Files\MySQL" -Filter "libmysql.lib" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $mysqlHeader -or -not $mysqlLib) { throw "MySQL-Dateien nicht gefunden" }
+
+          "BOOST_ROOT=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "Boost_DIR=$($boostConfig.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MYSQL_INC=$($mysqlHeader.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MYSQL_LIB=$($mysqlLib.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: CMake konfigurieren
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DTOOLS=1 -DSCRIPTS=static -DWITH_WARNINGS=0 `
+            -DBOOST_ROOT="$env:BOOST_ROOT" `
+            -DBoost_DIR="$env:Boost_DIR" `
+            -DMYSQL_INCLUDE_DIR="$env:MYSQL_INC" `
+            -DMYSQL_LIBRARY="$env:MYSQL_LIB"
 
       - name: Server und Tools kompilieren
         run: |
@@ -27,8 +49,8 @@ jobs:
         shell: pwsh
         run: |
           $out = "build\bin\RelWithDebInfo"
-          Get-ChildItem "C:\Program Files\MySQL" -Filter "libmysql.dll" -Recurse | Copy-Item -Destination $out -Force
-          Get-ChildItem "C:\Program Files\OpenSSL-Win64" -Include "libcrypto*.dll","libssl*.dll" -Recurse | Copy-Item -Destination $out -Force
+          Get-ChildItem "C:\tools", "C:\Program Files\MySQL" -Filter "libmysql.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 | Copy-Item -Destination $out -Force
+          Get-ChildItem "C:\Program Files\OpenSSL-Win64" -Include "libcrypto*.dll","libssl*.dll" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination $out -Force
           Remove-Item "$out\*.pdb" -Force -ErrorAction SilentlyContinue
 
       - name: Fertigen Server als ZIP hochladen
