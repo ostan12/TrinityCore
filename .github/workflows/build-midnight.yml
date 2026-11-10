@@ -1,0 +1,39 @@
+name: Build TrinityCore Midnight (Win64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Abhaengigkeiten installieren (Boost, OpenSSL, MySQL)
+        run: |
+          choco install -y --no-progress boost-msvc-14.3 openssl mysql
+
+      - name: CMake konfigurieren
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTOOLS=1 -DSCRIPTS=static -DWITH_WARNINGS=0
+
+      - name: Server und Tools kompilieren
+        run: |
+          cmake --build build --config RelWithDebInfo -j 4
+
+      - name: Runtime-DLLs kopieren und aufraeumen
+        shell: pwsh
+        run: |
+          $out = "build\bin\RelWithDebInfo"
+          Get-ChildItem "C:\Program Files\MySQL" -Filter "libmysql.dll" -Recurse | Copy-Item -Destination $out -Force
+          Get-ChildItem "C:\Program Files\OpenSSL-Win64" -Include "libcrypto*.dll","libssl*.dll" -Recurse | Copy-Item -Destination $out -Force
+          Remove-Item "$out\*.pdb" -Force -ErrorAction SilentlyContinue
+
+      - name: Fertigen Server als ZIP hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrinityCore-Midnight-Win64
+          path: build/bin/RelWithDebInfo/
+          retention-days: 14
